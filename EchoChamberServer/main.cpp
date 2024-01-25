@@ -156,7 +156,7 @@ int main(int argc, char** argv)
 
             std::cout << "Accepted client connection " << new_socket << " from " << inet_ntoa(address.sin_addr) << std::endl;
 
-            const char* greeting_message = "Welcome, Wayward Stranger.";
+            const char* greeting_message = "Welcome, Wayward Stranger. \r\n";
             if (send(new_socket, greeting_message, strlen(greeting_message), 0) != strlen(greeting_message)) {
                 std::cerr << "Greeting Message failed to send" << std::endl;
                 exit(EXIT_FAILURE);
@@ -175,9 +175,47 @@ int main(int argc, char** argv)
 
         // handle input from clients
         for (i = 0; i < MAX_CLIENTS; ++i) {
+            s = client_socket[i];
 
+            if (FD_ISSET(s, &readfds)) {
+                getpeername(s, (struct sockaddr*)&address, (int*)addrlen);
+
+                // check if disconnecting
+                std::cout << "Checking client " << inet_ntoa(address.sin_addr) << " for data" << std::endl;
+                valread = recv(s, buffer, DEFAULT_BUFLEN, 0);
+
+                if (valread == SOCKET_ERROR) {
+                    int error_code = WSAGetLastError();
+                    if (error_code == WSAECONNRESET) {
+                        // client disconnected ungracefully
+                        std::cout << "Client disconnected unexpectedly: " << inet_ntoa(address.sin_addr) << std::endl;
+                        closesocket(s);
+                        client_socket[i] = INVALID_SOCKET;
+                    }
+                    else
+                    {
+                        std::cerr << "recv failed with error code " << error_code << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                else if (valread == 0) {
+                    // accept client disconnected
+                    std::cout << "Client disconnected: " << inet_ntoa(address.sin_addr) << std::endl;
+                    closesocket(s);
+                    client_socket[i] = INVALID_SOCKET;
+                }
+                else {
+                    buffer[valread] = '\0';
+                    std::cout << "from " << inet_ntoa(address.sin_addr) << ": " << buffer << std::endl;
+                    send(s, buffer, valread, 0);
+                }
+            }
         }
     }
+
+    closesocket(s);
+    WSACleanup();
+
 
 
 
@@ -223,5 +261,5 @@ int main(int argc, char** argv)
 
 
     std::cout << "Done ==" << std::endl;
-    return 1;
+    exit(EXIT_SUCCESS);
 }
