@@ -2,12 +2,17 @@
 #define UNICODE
 #endif
 
+#ifndef _WINSOCK_DEPRECATED_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#endif
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif // !WIN32_LEAN_AND_MEAN
 
 #define DEFAULT_PORT "27012"
-#define DEFAULT_BUFLEN 512
+#define DEFAULT_BUFLEN 1024
+#define MAX_CLIENTS 30
 
 #include <WinSock2.h>
 #include <WS2tcpip.h>
@@ -16,13 +21,40 @@
 
 #pragma comment(lib, "Ws2_32.lib")
 
-WSADATA wsaData;
-SOCKET ListenSocket = INVALID_SOCKET, ClientSocket = INVALID_SOCKET;
-int iResult;
+WSADATA 
+    wsaData;
 
-struct addrinfo *result = NULL, *ptr = NULL, hints;
+SOCKET 
+    master = INVALID_SOCKET, 
+    new_socket = INVALID_SOCKET,
+    client_socket[MAX_CLIENTS]{ INVALID_SOCKET }, 
+    s = INVALID_SOCKET;
 
+struct addrinfo
+    * result = NULL,
+    * ptr = NULL, 
+    hints;
 
+struct sockaddr_in
+    server,
+    address;
+
+int 
+    iresult,
+    activity, 
+    addrlen, 
+    i,
+    valread;
+
+char 
+    *buffer;
+
+std::string 
+    s_port = DEFAULT_PORT;
+
+// socket descriptors
+fd_set 
+    readfds;
 
 
 
@@ -31,12 +63,13 @@ int main(int argc, char** argv)
 {
     std::cout << "Server" << std::endl;
 
-    std::string s_port = DEFAULT_PORT;
     if (argc == 2) {
         s_port = std::string(argv[1]);
     }
 
     const char* c_port = s_port.c_str();
+
+    buffer = (char*)malloc((DEFAULT_BUFLEN + 1) * sizeof(char));
 
     ZeroMemory(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -44,89 +77,148 @@ int main(int argc, char** argv)
     hints.ai_protocol = IPPROTO_TCP;
     hints.ai_flags = AI_PASSIVE;
 
+    for (i = 0; i < MAX_CLIENTS; ++i) 
+        client_socket[i] = INVALID_SOCKET;
 
-    iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (iResult != 0) {
-        std::cerr << "WSAStartup Failed " << iResult << std::endl;
-        return 0;
+    iresult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (iresult != 0) {
+        std::cerr << "WSAStartup Failed " << iresult << std::endl;
+        exit(EXIT_FAILURE);
     }
 
-    iResult = getaddrinfo("0.0.0.0", c_port, &hints, &result);
-    if (iResult != 0) {
-        std::cerr << "getaddrinfo failed " << iResult << std::endl;
+    iresult = getaddrinfo("0.0.0.0", c_port, &hints, &result);
+    if (iresult != 0) {
+        std::cerr << "getaddrinfo failed " << iresult << std::endl;
         WSACleanup();
-        return 0;
+        exit(EXIT_FAILURE);
     }
 
-
-    ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-    if (ListenSocket == INVALID_SOCKET) {
+    master = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    if (master == INVALID_SOCKET) {
         std::cerr << "Error at socket(): " << WSAGetLastError() << std::endl;
         freeaddrinfo(result);
         WSACleanup();
-        return 0;
+        exit(EXIT_FAILURE);
     }
 
-    iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
-    if (iResult == SOCKET_ERROR) {
+    iresult = bind(master, result->ai_addr, (int)result->ai_addrlen);
+    if (iresult == SOCKET_ERROR) {
         std::cerr << "bind failed with error " << WSAGetLastError() << std::endl;
         freeaddrinfo(result);
-        closesocket(ListenSocket);
+        closesocket(master);
         WSACleanup();
-        return 0;
+        exit(EXIT_FAILURE);
     }
 
     freeaddrinfo(result);
 
     std::cout << "Listening on 0.0.0.0:" << c_port << std::endl;
-    if (listen(ListenSocket, SOMAXCONN) == SOCKET_ERROR) {
+    if (listen(master, SOMAXCONN) == SOCKET_ERROR) {
         std::cerr << "Listen failed with error " << WSAGetLastError() << std::endl;
-        closesocket(ListenSocket);
+        closesocket(master);
         WSACleanup();
-        return 1;
+        exit(EXIT_FAILURE);
     }
+
+    addrlen = sizeof(struct sockaddr_in);
     
     std::cout << "waiting for connections..." << std::endl;
-    ClientSocket = accept(ListenSocket, NULL, NULL);
-    if (ClientSocket == INVALID_SOCKET) {
-        std::cerr << "accept failed " << WSAGetLastError() << std::endl;
-        closesocket(ListenSocket);
-        WSACleanup();
-        return 1;
-    }
 
-    std::cout << "Connection received" << std::endl;
 
-    char recvbuf[DEFAULT_BUFLEN];
-    int iSendResult;
-    int recvbuflen = DEFAULT_BUFLEN;
-    do {
+    // infinite loop
+    for (;;) {
+        // clear descriptor set
+        FD_ZERO(&readfds);
 
-        iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-        if (iResult > 0) {
-            std::cout << "Bytes received " << iResult << std::endl;
+        // add master to descriptor set
+        FD_SET(master, &readfds);
 
-            iSendResult = send(ClientSocket, recvbuf, iResult, 0);
-            if (iSendResult == SOCKET_ERROR) {
-                std::cerr << "send failed: " << WSAGetLastError() << std::endl;
-                closesocket(ClientSocket);
-                WSACleanup();
-                return 1;
+        // add children to descriptor set
+        for (i = 0; i < MAX_CLIENTS; ++i) {
+            s = client_socket[i];
+            if (s != INVALID_SOCKET) {
+                FD_SET(s, &readfds);
+            }
+        }
+
+        activity = select(0, &readfds, NULL, NULL, NULL);
+        if (activity == SOCKET_ERROR) {
+            std::cerr << "multiplex select failed with error: " << WSAGetLastError() << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // handle incoming connections
+        if (FD_ISSET(master, &readfds)) {
+            if ((new_socket = accept(master, (struct sockaddr*)&address, (int*)&addrlen)) < 0) {
+                std::cerr << "Unaccepted Client Connection?" << std::endl;
+                exit(EXIT_FAILURE);
             }
 
-            std::cout << "bytes sent " << iSendResult << std::endl;
-        }
-        else if (iResult == 0) {
-            std::cout << "Connection closing" << std::endl;
-        }
-        else {
-            std::cerr << "recv error: " << WSAGetLastError() << std::endl;
-            closesocket(ClientSocket);
-            WSACleanup();
-            return 1;
+            std::cout << "Accepted client connection " << new_socket << " from " << inet_ntoa(address.sin_addr) << std::endl;
+
+            const char* greeting_message = "Welcome, Wayward Stranger.";
+            if (send(new_socket, greeting_message, strlen(greeting_message), 0) != strlen(greeting_message)) {
+                std::cerr << "Greeting Message failed to send" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            std::cout << "Welcome message sent" << std::endl;
+
+            for (i = 0; i < MAX_CLIENTS; ++i) {
+                if (client_socket[i] == INVALID_SOCKET) {
+                    client_socket[i] = new_socket;
+                    std::cout << "Adding socket to list at " << i << std::endl;
+                    break;
+                }
+            }
+
         }
 
-    } while (iResult > 0);
+        // handle input from clients
+        for (i = 0; i < MAX_CLIENTS; ++i) {
+
+        }
+    }
+
+
+
+    //ClientSocket = accept(master, NULL, NULL);
+    //if (ClientSocket == INVALID_SOCKET) {
+    //    std::cerr << "accept failed " << WSAGetLastError() << std::endl;
+    //    closesocket(master);
+    //    WSACleanup();
+    //    exit(EXIT_FAILURE);
+    //}
+
+    //std::cout << "Connection received" << std::endl;
+
+    //
+    //do {
+
+    //    iresult = recv(ClientSocket, recvbuf, recvbuflen, 0);
+    //    if (iresult > 0) {
+    //        std::cout << "Bytes received " << iresult << std::endl;
+
+    //        iSendResult = send(ClientSocket, recvbuf, iresult, 0);
+    //        if (iSendResult == SOCKET_ERROR) {
+    //            std::cerr << "send failed: " << WSAGetLastError() << std::endl;
+    //            closesocket(ClientSocket);
+    //            WSACleanup();
+    //            return 1;
+    //        }
+
+    //        std::cout << "bytes sent " << iSendResult << std::endl;
+    //    }
+    //    else if (iresult == 0) {
+    //        std::cout << "Connection closing" << std::endl;
+    //    }
+    //    else {
+    //        std::cerr << "recv error: " << WSAGetLastError() << std::endl;
+    //        closesocket(ClientSocket);
+    //        WSACleanup();
+    //        return 1;
+    //    }
+
+    //} while (iresult > 0);
 
 
 
