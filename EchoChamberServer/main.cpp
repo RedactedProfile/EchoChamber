@@ -226,50 +226,6 @@ int main(int argc, char** argv)
     closesocket(s);
     WSACleanup();
 
-
-
-
-    //ClientSocket = accept(master, NULL, NULL);
-    //if (ClientSocket == INVALID_SOCKET) {
-    //    std::cerr << "accept failed " << WSAGetLastError() << std::endl;
-    //    closesocket(master);
-    //    WSACleanup();
-    //    exit(EXIT_FAILURE);
-    //}
-
-    //std::cout << "Connection received" << std::endl;
-
-    //
-    //do {
-
-    //    iresult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-    //    if (iresult > 0) {
-    //        std::cout << "Bytes received " << iresult << std::endl;
-
-    //        iSendResult = send(ClientSocket, recvbuf, iresult, 0);
-    //        if (iSendResult == SOCKET_ERROR) {
-    //            std::cerr << "send failed: " << WSAGetLastError() << std::endl;
-    //            closesocket(ClientSocket);
-    //            WSACleanup();
-    //            return 1;
-    //        }
-
-    //        std::cout << "bytes sent " << iSendResult << std::endl;
-    //    }
-    //    else if (iresult == 0) {
-    //        std::cout << "Connection closing" << std::endl;
-    //    }
-    //    else {
-    //        std::cerr << "recv error: " << WSAGetLastError() << std::endl;
-    //        closesocket(ClientSocket);
-    //        WSACleanup();
-    //        return 1;
-    //    }
-
-    //} while (iresult > 0);
-
-
-
     std::cout << "Done ==" << std::endl;
     exit(EXIT_SUCCESS);
 }
