@@ -125,6 +125,8 @@ int main(int argc, char** argv)
     std::cout << "waiting for connections..." << std::endl;
 
 
+    char newbuffer[DEFAULT_BUFLEN];
+
     // infinite loop
     for (;;) {
         // clear descriptor set
@@ -175,14 +177,18 @@ int main(int argc, char** argv)
 
         // handle input from clients
         for (i = 0; i < MAX_CLIENTS; ++i) {
+            if (client_socket[i] == INVALID_SOCKET) 
+                continue;
+
             s = client_socket[i];
 
             if (FD_ISSET(s, &readfds)) {
-                getpeername(s, (struct sockaddr*)&address, (int*)addrlen);
+                getpeername(s, (struct sockaddr*)&address, (int*)&addrlen);
 
                 // check if disconnecting
-                std::cout << "Checking client " << inet_ntoa(address.sin_addr) << " for data" << std::endl;
-                valread = recv(s, buffer, DEFAULT_BUFLEN, 0);
+                std::cout << "Checking client for data" << std::endl;
+
+                valread = recv(s, newbuffer, DEFAULT_BUFLEN, 0);
 
                 if (valread == SOCKET_ERROR) {
                     int error_code = WSAGetLastError();
@@ -205,9 +211,13 @@ int main(int argc, char** argv)
                     client_socket[i] = INVALID_SOCKET;
                 }
                 else {
-                    buffer[valread] = '\0';
-                    std::cout << "from " << inet_ntoa(address.sin_addr) << ": " << buffer << std::endl;
-                    send(s, buffer, valread, 0);
+                    newbuffer[valread] = '\0';
+                    std::cout << "from " << inet_ntoa(address.sin_addr) << ": " << newbuffer << std::endl;
+
+                    std::string sendbuf = "Got your message: ";
+                    sendbuf.append(newbuffer);
+
+                    send(s, sendbuf.c_str(), sendbuf.length(), 0);
                 }
             }
         }
